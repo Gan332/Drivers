@@ -1,0 +1,90 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号 (如 1.0.0)'
+        required: true
+        type: string
+
+jobs:
+  build:
+    name: Build Flutter APK & AAB
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🐦 Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.27.4
+          cache: true
+
+      - name: 📦 Install dependencies
+        run: flutter pub get
+
+      - name: 🔨 Build APK (release)
+        run: flutter build apk --release --split-per-abi
+
+      - name: 🔨 Build APK (universal)
+        run: flutter build apk --release
+
+      - name: 🔨 Build AAB
+        run: flutter build appbundle --release
+
+      - name: 📤 Upload APKs as artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-files
+          path: |
+            build/app/outputs/flutter-apk/*.apk
+          retention-days: 7
+
+      - name: 📤 Upload AAB as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: appbundle
+          path: build/app/outputs/bundle/release/*.aab
+          retention-days: 7
+
+      - name: 🏷️ Extract version
+        id: get_version
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "tag=v${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 📝 Generate release notes
+        id: release_notes
+        run: |
+          echo "notes=## 备忘录 App v${{ steps.get_version.outputs.tag }}
+
+          ### 更新内容
+          - 新版本发布
+
+          ---
+          *由 GitHub Actions 自动构建*" > /tmp/release_notes.md
+
+      - name: 🚀 Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.get_version.outputs.tag }}
+          name: 备忘录 v${{ steps.get_version.outputs.tag }}
+          body_path: /tmp/release_notes.md
+          draft: false
+          prerelease: false
+          files: |
+            build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+            build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
+            build/app/outputs/flutter-apk/app-x86_64-release.apk
+            build/app/outputs/flutter-apk/app-release.apk
+            build/app/outputs/bundle/release/app-release.aab
